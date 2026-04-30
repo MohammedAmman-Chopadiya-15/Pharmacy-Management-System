@@ -22,7 +22,9 @@ class User(Base):
 class Prescription(Base):
     __tablename__ = "PRESCRIPTIONS"
     PrescriptionID = Column(Integer, primary_key=True, index=True)
-    PatientID = Column(Integer)
+    PatientID = Column(Integer, ForeignKey("PATIENTS.PatientID"))
+    FacilityID = Column(Integer, ForeignKey("FACILITIES.FacilityID"))
+    Status = Column(String(20))
 
 
 # The Security View

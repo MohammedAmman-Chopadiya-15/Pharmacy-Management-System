@@ -136,3 +136,37 @@ def get_vaccination_report(
 
     return results
 
+"""
+Management Analytics.
+Uses conditional aggregation to provide facility performance metrics.
+Restricted to Staff/Admin roles.
+"""
+
+@app.get("/reports/facility-workload", 
+         response_model=List[schemas.FacilityWorkload], 
+         tags=["Management Reports"])
+def get_facility_workload(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    # Authorization: Only Staff (Roles 1-4) should see management reports
+    if current_user.RoleID == 5:
+        raise HTTPException(
+            status_code=403, 
+            detail="Access denied: Patients cannot view facility workload reports"
+        )
+
+    # Query logic: Join Facilities to Prescriptions and count statuses
+    results = db.query(
+        models.Facility.FacilityName,
+        func.count(models.Prescription.PrescriptionID).label("TotalPrescriptions"),
+        func.sum(func.if_(models.Prescription.Status == 'Pending', 1, 0)).label("PendingCount"),
+        func.sum(func.if_(models.Prescription.Status == 'Dispensed', 1, 0)).label("DispensedCount")
+    ).join(models.Prescription, models.Facility.FacilityID == models.Prescription.FacilityID)\
+     .group_by(models.Facility.FacilityName)\
+     .all()
+
+    if not results:
+        raise HTTPException(status_code=404, detail="No facility workload data found")
+
+    return results

@@ -36,3 +36,11 @@ class VaccinationSummary(BaseModel):
     class Config:
         from_attributes = True
 
+class FacilityWorkload(BaseModel):
+    FacilityName: str
+    TotalPrescriptions: int
+    PendingCount: int
+    DispensedCount: int
+
+    class Config:
+        from_attributes = True
