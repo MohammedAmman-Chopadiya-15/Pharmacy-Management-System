@@ -238,12 +238,24 @@ INSERT INTO SYSTEM_USERS (Username, HashedPassword, RoleID, PatientID) VALUES
 ('mgr_rsmith', 'password123', 3, NULL),
 ('res_ltaylor', 'password123', 4, NULL);
 
--- System Users: Patient Accounts (Linking login to Patient ID)
+-- System Users: Patient Accounts for all 15 entries
+-- Logic: Username is patient_firstname, Password is NHSNumber+LastName
 INSERT INTO SYSTEM_USERS (Username, HashedPassword, RoleID, PatientID) VALUES 
-('patient_jwilson', 'password123', 5, 1),
-('patient_sbennett', 'password123', 5, 6),
-('patient_mreed', 'password123', 5, 7),
-('patient_cfisher', 'password123', 5, 8);
+('james041',   '4857293041Wilson',  5, 1),
+('sarah650',   '9928374650Ahmed',   5, 2),
+('robert756',  '1029384756Taylor',  5, 3),
+('elena899',   '5566778899Petrova', 5, 4),
+('david876',   '1234509876Smith',   5, 5),
+('sophie455',  '1122334455Bennett', 5, 6),
+('marcus900',  '6677889900Reed',    5, 7),
+('chloe655',   '9988776655Fisher',  5, 8),
+('thomas544',  '8877665544Brown',   5, 9),
+('linda211',   '5544332211Jones',   5, 10),
+('william566', '2233445566Davies',  5, 11),
+('emily011',   '7788990011White',   5, 12),
+('arthur212',  '1212121212Morgan',  5, 13),
+('sadie434',   '3434343434Adler',   5, 14),
+('john656',    '5656565656Marston', 5, 15);
 
 -- Vaccinations Data
 INSERT INTO VACCINATIONS (PatientID, DoctorID, VaccineType, DoseNumber, DateAdministered) VALUES 

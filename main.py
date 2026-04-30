@@ -42,9 +42,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     """
     user = db.query(models.User).filter(models.User.Username == form_data.username).first()
     
-    # For the Masters demo, we check against the plain text 'password123' 
-    # to match the initial DML state. 
-    if not user or form_data.password != "password123":
+    if not user or form_data.password != user.HashedPassword:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -170,3 +168,57 @@ def get_facility_workload(
         raise HTTPException(status_code=404, detail="No facility workload data found")
 
     return results
+
+
+@app.post("/patients/register-portal", tags=["Patient Management"])
+def register_patient_with_portal(
+    data: schemas.PatientPortalRegistration, 
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Masters Level: Atomic Transaction.
+    Creates a Patient and a System User account in a single operation.
+    """
+    # 1. Authorization: Only Staff/Admin can register new patients
+    if current_user.RoleID == 5:
+        raise HTTPException(status_code=403, detail="Patients cannot register other patients")
+
+    # 2. Create the Patient Record
+    new_patient = models.Patient(
+        NHS_Number=data.NHS_Number,
+        FirstName=data.FirstName,
+        LastName=data.LastName,
+        DateOfBirth=data.DateOfBirth,
+        Address=data.Address,
+        Phone_Number=data.Phone_Number,
+        Allergies=data.Allergies
+    )
+    db.add(new_patient)
+    db.flush() # Flush to get the new_patient.PatientID before committing
+
+    # 3. Generate Credentials and Create User Account
+    # Logic: Username = FirstName, Password = NHSNumber + LastName
+    suffix = data.NHS_Number[-3:]
+    generated_username = f"{data.FirstName.lower()}{suffix}"
+    generated_password = f"{data.NHS_Number}{data.LastName}"
+
+    new_user = models.User(
+        Username=generated_username,
+        HashedPassword=generated_password,
+        RoleID=5, # Role 5 is 'Patient'
+        PatientID=new_patient.PatientID
+    )
+    db.add(new_user)
+    
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Registration failed. NHS Number or Username may already exist.")
+
+    return {
+        "message": "Patient and Portal account created successfully",
+        "username": generated_username,
+        "temporary_password": generated_password
+    }

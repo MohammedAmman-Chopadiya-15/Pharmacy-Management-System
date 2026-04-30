@@ -14,6 +14,15 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+class PatientPortalRegistration(BaseModel):
+    NHS_Number: str
+    FirstName: str
+    LastName: str
+    DateOfBirth: date
+    Address: str
+    Phone_Number: str
+    Allergies: Optional[str] = "None"
+
 class PatientPortalResponse(BaseModel):
     PrescriptionID: int
     MedicationName: str
