@@ -1,27 +1,26 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import date
-from typing import Optional, List
+from typing import Optional
 
-class PatientBase(BaseModel):
-    NHS_Number: str = Field(..., min_length=10, max_length=10)
-    FirstName: str
-    LastName: str
-    DateOfBirth: date
-    Address: Optional[str] = None
-    Phone_Number: Optional[str] = None
-    Allergies: Optional[str] = None
 
-class PatientResponse(PatientBase):
-    PatientID: int
-    class Config:
-        from_attributes = True
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
-class MedicationBase(BaseModel):
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class PatientPortalResponse(BaseModel):
+    PrescriptionID: int
     MedicationName: str
     Dosage: str
-    Form_Type: str
+    DatePrescribed: date
+    Status: str
+    DirectionsForUse: Optional[str] = None
 
-class MedicationResponse(MedicationBase):
-    MedicationID: int
     class Config:
         from_attributes = True

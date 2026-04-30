@@ -1,20 +1,36 @@
-from sqlalchemy import Column, Integer, String, Date, Text
+from sqlalchemy import Column, Integer, String, Date, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from database import Base
 
-class Patient(Base):
-    __tablename__ = "PATIENTS"
-    PatientID = Column(Integer, primary_key=True, index=True)
-    NHS_Number = Column(String(10), unique=True)
-    FirstName = Column(String(50))
-    LastName = Column(String(50))
-    DateOfBirth = Column(Date)
-    Address = Column(String(255))
-    Phone_Number = Column(String(15))
-    Allergies = Column(Text)
 
-class Medication(Base):
-    __tablename__ = "MEDICATIONS"
-    MedicationID = Column(Integer, primary_key=True, index=True)
+class UserRole(Base):
+    __tablename__ = "USER_ROLES"
+    RoleID = Column(Integer, primary_key=True, index=True)
+    RoleName = Column(String(50), unique=True)
+
+class User(Base):
+    __tablename__ = "SYSTEM_USERS"
+    UserID = Column(Integer, primary_key=True, index=True)
+    Username = Column(String(50), unique=True, index=True)
+    HashedPassword = Column(String(255)) # We will hash the passwords from your DML
+    RoleID = Column(Integer, ForeignKey("USER_ROLES.RoleID"))
+    
+    role = relationship("UserRole")
+
+# Original table required for the .filter() logic in main.py
+class Prescription(Base):
+    __tablename__ = "PRESCRIPTIONS"
+    PrescriptionID = Column(Integer, primary_key=True, index=True)
+    PatientID = Column(Integer)
+
+
+# The Security View
+class PatientSelfService(Base):
+    __tablename__ = "Patient_Self_Service_View"
+    PrescriptionID = Column(Integer, primary_key=True)
+    PatientID = Column(Integer)  # This MUST be here for the .filter() in main.py to work
     MedicationName = Column(String(100))
     Dosage = Column(String(50))
-    Form_Type = Column(String(50))
+    DatePrescribed = Column(Date)
+    Status = Column(String(20))
+    DirectionsForUse = Column(Text)
