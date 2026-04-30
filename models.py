@@ -12,8 +12,9 @@ class User(Base):
     __tablename__ = "SYSTEM_USERS"
     UserID = Column(Integer, primary_key=True, index=True)
     Username = Column(String(50), unique=True, index=True)
-    HashedPassword = Column(String(255)) # We will hash the passwords from your DML
+    HashedPassword = Column(String(255))
     RoleID = Column(Integer, ForeignKey("USER_ROLES.RoleID"))
+    PatientID = Column(Integer, ForeignKey("PATIENTS.PatientID"), nullable=True)
     
     role = relationship("UserRole")
 

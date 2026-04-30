@@ -125,14 +125,14 @@ DROP USER IF EXISTS 'admin_user'@'%', 'pharmacist_user'@'%', 'manager_user'@'%',
 CREATE VIEW Patient_Self_Service_View AS
 SELECT 
     p.PrescriptionID, 
+    p.PatientID, 
     m.MedicationName, 
     m.Dosage, 
     p.DatePrescribed, 
     p.Status, 
     p.DirectionsForUse
 FROM PRESCRIPTIONS p
-JOIN MEDICATIONS m ON p.MedicationID = m.MedicationID
-WHERE p.PatientID = 1;
+JOIN MEDICATIONS m ON p.MedicationID = m.MedicationID;
 
 -- 3. CREATE USER ACCOUNTS
 CREATE USER 'admin_user'@'%' IDENTIFIED BY 'AdminPass123';

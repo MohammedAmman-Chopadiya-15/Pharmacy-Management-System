@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timedelta
@@ -53,21 +54,51 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = create_access_token(data={"sub": user.Username})
     return {"access_token": access_token, "token_type": "bearer"}
 
-@app.get("/my-prescriptions/{patient_id}", 
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+        
+    user = db.query(models.User).filter(models.User.Username == username).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+# SECURE ENDPOINT: No ID in the URL
+@app.get("/my-prescriptions/me", 
          response_model=List[schemas.PatientPortalResponse], 
          tags=["Patient Portal"])
-def get_self_service_prescriptions(patient_id: int, db: Session = Depends(database.get_db)):
+def get_my_own_prescriptions(
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(database.get_db)
+):
     """
-    Masters Level: This endpoint leverages a Secure Database View 
-    to ensure patients only see authorized prescription data.
+    Masters Level: This endpoint is now truly secure. It ignores URL inputs 
+    and uses the PatientID linked to the authenticated JWT session.
     """
+    # Verify this user is actually a patient
+    if current_user.PatientID is None:
+        raise HTTPException(status_code=403, detail="This account is not linked to a patient record")
+
+    # Use the PatientID from the DATABASE
     results = db.query(models.PatientSelfService).filter(
-        models.PatientSelfService.PrescriptionID.in_(
-            db.query(models.Prescription.PrescriptionID).filter(models.Prescription.PatientID == patient_id)
-        )
+        models.PatientSelfService.PatientID == current_user.PatientID
     ).all()
     
     if not results:
-        raise HTTPException(status_code=404, detail="No prescriptions found for this account")
+        raise HTTPException(status_code=404, detail="No prescriptions found for your account")
         
     return results
+
+
+
+
