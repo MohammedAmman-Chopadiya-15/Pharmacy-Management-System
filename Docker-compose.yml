@@ -3,15 +3,16 @@ version: '3.8'
 services:
   db:
     image: mysql:8.0
-    container_name: pharmacy_db_container
+    container_name: MedCare_Local
     restart: always
     environment:
-      MYSQL_DATABASE: pharmacy_db
-      MYSQL_ROOT_PASSWORD: your_password
+      MYSQL_DATABASE: MedCare
+      MYSQL_ROOT_PASSWORD: admin123
     ports:
     - "3306:3306"
     volumes:
     - db_data:/var/lib/mysql
+    - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
   api:
     build: .
@@ -22,7 +23,7 @@ services:
     - db
     environment:
       # Note: We use 'db' (the service name) instead of 'localhost'
-      DATABASE_URL: mysql+pymysql://root:your_password@db:3306/pharmacy_db
+      DATABASE_URL: mysql+pymysql://root:your_password@db:3306/MedCare
     volumes:
     - .:/app
 

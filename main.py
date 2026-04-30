@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+import models, schemas, database
 
-app = FastAPI(title="Pharmacy Management System API")
+app = FastAPI(title="MedCare API")
 
 @app.get("/")
 def read_root():
-    return {"message": "Pharmacy API is live and running in Docker!"}
+    return {"message": "MedCare API is live and running in Docker!"}

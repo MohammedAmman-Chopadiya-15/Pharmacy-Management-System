@@ -26,7 +26,7 @@ A containerized RESTful Web Service built with FastAPI and MySQL. This project d
 ## Installation & Setup
 1. Clone the repository:
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/MohammedAmman-Chopadiya-15/Pharmacy-Management-System.git
    ```
 2. Start the service using Docker Compose:
    ```bash
