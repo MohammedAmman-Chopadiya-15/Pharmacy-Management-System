@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, ForeignKey, Date, Text, func
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -18,7 +18,7 @@ class User(Base):
     
     role = relationship("UserRole")
 
-# Original table required for the .filter() logic in main.py
+
 class Prescription(Base):
     __tablename__ = "PRESCRIPTIONS"
     PrescriptionID = Column(Integer, primary_key=True, index=True)
@@ -35,3 +35,39 @@ class PatientSelfService(Base):
     DatePrescribed = Column(Date)
     Status = Column(String(20))
     DirectionsForUse = Column(Text)
+
+
+class Doctor(Base):
+    __tablename__ = "DOCTORS"
+    DoctorID = Column(Integer, primary_key=True, index=True)
+    PrescriberName = Column(String(100))
+    FacilityID = Column(Integer, ForeignKey("FACILITIES.FacilityID"))
+
+class Vaccination(Base):
+    __tablename__ = "VACCINATIONS"
+    VaccinationID = Column(Integer, primary_key=True, index=True)
+    PatientID = Column(Integer, ForeignKey("PATIENTS.PatientID"))
+    DoctorID = Column(Integer, ForeignKey("DOCTORS.DoctorID"))
+    VaccineType = Column(String(100))
+    DoseNumber = Column(Integer)
+    DateAdministered = Column(Date)
+
+class Facility(Base):
+    __tablename__ = "FACILITIES"
+    FacilityID = Column(Integer, primary_key=True, index=True)
+    FacilityName = Column(String(100))
+    Full_Address = Column(String(255))
+
+class Patient(Base):
+    __tablename__ = "PATIENTS"
+    PatientID = Column(Integer, primary_key=True, index=True)
+    NHS_Number = Column(String(10), unique=True)
+    FirstName = Column(String(50))
+    LastName = Column(String(50))
+    DateOfBirth = Column(Date)
+    Address = Column(String(255))
+    Phone_Number = Column(String(15))
+    Allergies = Column(String(255), default="None")
+
+    # Relationships
+    vaccinations = relationship("Vaccination", backref="patient")

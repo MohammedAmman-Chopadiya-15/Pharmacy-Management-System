@@ -24,3 +24,15 @@ class PatientPortalResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class VaccinationSummary(BaseModel):
+    PatientName: str
+    NHS_Number: str
+    VaccineType: str
+    TotalDoses: int
+    LastDoseDate: date
+    AdministeringDoctor: str
+
+    class Config:
+        from_attributes = True
+

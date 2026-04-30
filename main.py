@@ -102,3 +102,37 @@ def get_my_own_prescriptions(
 
 
 
+@app.get("/reports/vaccination-coverage/{vaccine_type}", 
+         response_model=List[schemas.VaccinationSummary], 
+         tags=["Management Reports"])
+def get_vaccination_report(
+    vaccine_type: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+    ):
+    """Joins PATIENTS, VACCINATIONS, and DOCTORS to track clinical progress."""
+    # Block patients (Role 5) from seeing aggregate reports
+    if current_user.RoleID == 5:
+        raise HTTPException(
+            status_code=403, 
+            detail="Access denied: Patients cannot view management reports"
+        )
+    
+    results = db.query(
+        func.concat(models.Patient.FirstName, ' ', models.Patient.LastName).label("PatientName"),
+        models.Patient.NHS_Number,
+        models.Vaccination.VaccineType,
+        func.count(models.Vaccination.VaccinationID).label("TotalDoses"),
+        func.max(models.Vaccination.DateAdministered).label("LastDoseDate"),
+        models.Doctor.PrescriberName.label("AdministeringDoctor")
+    ).join(models.Vaccination, models.Patient.PatientID == models.Vaccination.PatientID)\
+     .join(models.Doctor, models.Vaccination.DoctorID == models.Doctor.DoctorID)\
+     .filter(models.Vaccination.VaccineType.ilike(f"%{vaccine_type}%"))\
+     .group_by(models.Patient.PatientID, models.Vaccination.VaccineType, models.Doctor.PrescriberName)\
+     .all()
+
+    if not results:
+        raise HTTPException(status_code=404, detail=f"No records found for vaccine: {vaccine_type}")
+
+    return results
+
