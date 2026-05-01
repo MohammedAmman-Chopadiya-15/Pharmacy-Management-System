@@ -374,3 +374,37 @@ def conduct_clinical_consultation(
     db.add(new_log)
     db.commit()
     return {"message": "New clinical encounter recorded and profile updated"}
+
+"""
+Delete incorrect prescription records
+Prevents deletion of fulfilled clinical records to maintain legal audit trails.
+"""
+
+@app.delete("/prescriptions/{prescription_id}", tags=["Clinical Operations"])
+def cancel_prescription(
+    prescription_id: int, 
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+
+    # 1. Auth: Only Admins or Doctors
+    if current_user.RoleID not in [1, 3]:
+        raise HTTPException(status_code=403, detail="Only clinical staff can cancel prescriptions")
+
+    prescription = db.query(models.Prescription).filter(
+        models.Prescription.PrescriptionID == prescription_id
+    ).first()
+
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    # 2. The Guard: Block deletion if already fulfilled
+    if prescription.Status in ["Dispensed", "Collected"]:
+        raise HTTPException(
+            status_code=400, 
+            detail="Legal Restriction: Cannot delete a prescription once it has been dispensed."
+        )
+
+    db.delete(prescription)
+    db.commit()
+    return {"message": f"Prescription {prescription_id} successfully removed."}
