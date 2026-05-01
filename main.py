@@ -264,3 +264,40 @@ def issue_bulk_prescriptions(
 
     db.commit()
     return {"message": f"Successfully issued {len(new_prescriptions)} tailored prescriptions"}
+
+
+"""
+State Machine Transition.
+Only allows Roles 1 (Admin) or 2 (Pharmacist) to update status to 'Dispensed'.
+"""
+
+@app.put("/prescriptions/{prescription_id}/dispense", tags=["Clinical Operations"])
+def dispense_prescription(
+    prescription_id: int, 
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+
+    # 1. Role-Based Access Control (Only admin and Pharmacist)
+    if current_user.RoleID not in [1, 2]:
+        raise HTTPException(status_code=403, detail="Only Pharmacists can dispense medication")
+
+    # 2. Fetch the record
+    prescription = db.query(models.Prescription).filter(
+        models.Prescription.PrescriptionID == prescription_id
+    ).first()
+
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    # 3. Logic check: Prevent double-dispensing
+    if prescription.Status in ["Dispensed","Collected"]:
+        raise HTTPException(status_code=400, detail="This prescription has already been dispensed")
+
+    # 4. Perform update
+    prescription.Status = "Dispensed"
+    prescription.DateDispensed = datetime.now().date()
+    prescription.DispensingPharmacist = current_user.Username
+    
+    db.commit()
+    return {"message": f"Success: Prescription {prescription_id} marked as Dispensed"}
