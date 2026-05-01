@@ -16,7 +16,8 @@ CREATE TABLE MEDICATIONS (
     MedicationID INT PRIMARY KEY AUTO_INCREMENT,
     MedicationName VARCHAR(100) NOT NULL,
     Dosage VARCHAR(50),
-    Form_Type VARCHAR(50)
+    Form_Type VARCHAR(50),
+    StockQuantity INT DEFAULT 0
 );
 
 -- 3. User Roles: Defines access levels (Admin, Researcher, etc.)
@@ -102,14 +103,6 @@ CREATE TABLE PRESCRIPTIONS (
     FOREIGN KEY (FacilityID) REFERENCES FACILITIES(FacilityID)
 );
 
-
-SHOW TABLES;
-
-DESCRIBE PRESCRIPTIONS;
-
-DESCRIBE PATIENTS;
-
-
 -- ------------------------------------DCL-------------------------------------------------------------
 
 
@@ -136,28 +129,11 @@ JOIN MEDICATIONS m ON p.MedicationID = m.MedicationID;
 
 -- 3. CREATE USER ACCOUNTS
 CREATE USER 'admin_user'@'%' IDENTIFIED BY 'AdminPass123';
-CREATE USER 'pharmacist_user'@'%' IDENTIFIED BY 'PharmaPass123';
-CREATE USER 'manager_user'@'%' IDENTIFIED BY 'ManagerPass123';
-CREATE USER 'patient_user'@'%' IDENTIFIED BY 'PatientPass123';
 
 -- 4. ASSIGN PRIVILEGES
 
 -- Admin: Full System Access
 GRANT ALL PRIVILEGES ON MedCare.* TO 'admin_user'@'%';
-
--- Pharmacist: Rule "Can dispense and update prescription status"
-GRANT SELECT, INSERT, UPDATE ON MedCare.PRESCRIPTIONS TO 'pharmacist_user'@'%';
-GRANT SELECT ON MedCare.PATIENTS TO 'pharmacist_user'@'%';
-GRANT SELECT ON MedCare.MEDICATIONS TO 'pharmacist_user'@'%';
-GRANT SELECT ON MedCare.FACILITIES TO 'pharmacist_user'@'%';
-
--- Manager: Rule "Can generate reports" (VIEW ONLY)
-GRANT SELECT ON MedCare.* TO 'manager_user'@'%';
-
--- Patient: Rule "Can only view their own prescriptions"
--- Granting access ONLY to the View, not the base table.
-GRANT SELECT ON MedCare.Patient_Self_Service_View TO 'patient_user'@'%';
-
 
 FLUSH PRIVILEGES;
 
@@ -180,15 +156,15 @@ INSERT INTO FACILITIES (FacilityName, Full_Address) VALUES
 ('University Health Centre', 'Brayford Pool, Lincoln, LN6 7TS');
 
 -- Medications Data
-INSERT INTO MEDICATIONS (MedicationName, Dosage, Form_Type) VALUES 
-('Amoxicillin', '500mg', 'Capsule'),
-('Atorvastatin', '20mg', 'Tablet'),
-('Salbutamol', '100mcg', 'Inhaler'),
-('Metformin', '850mg', 'Tablet'),
-('Sertraline', '50mg', 'Tablet'),
-('Spikevax (Covid-19)', '0.5ml', 'Injection'),
-('Fluad Quadrivalent', '0.5ml', 'Injection'),
-('Prednisolone', '5mg', 'Tablet');
+INSERT INTO MEDICATIONS (MedicationName, Dosage, Form_Type, StockQuantity) VALUES 
+('Amoxicillin', '500mg', 'Capsule', 252),
+('Atorvastatin', '20mg', 'Tablet', 506),
+('Salbutamol', '100mcg', 'Inhaler', 49),
+('Metformin', '850mg', 'Tablet', 300),
+('Sertraline', '50mg', 'Tablet', 120),
+('Spikevax (Covid-19)', '0.5ml', 'Injection', 74),
+('Fluad Quadrivalent', '0.5ml', 'Injection', 67),
+('Prednisolone', '5mg', 'Tablet', 211);
 
 -- User Roles Data
 INSERT INTO USER_ROLES (RoleName) VALUES 

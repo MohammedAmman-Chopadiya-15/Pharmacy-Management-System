@@ -90,3 +90,4 @@ class Medication(Base):
     MedicationName = Column(String(100), nullable=False)
     Dosage = Column(String(50))
     Form_Type = Column(String(50))
+    StockQuantity = Column(Integer, default=0)

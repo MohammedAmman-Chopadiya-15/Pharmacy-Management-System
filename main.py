@@ -277,12 +277,14 @@ def dispense_prescription(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-
-    # 1. Role-Based Access Control (Only admin and Pharmacist)
+    """
+    Masters Level: Atomic State Transition with Inventory Reconciliation.
+    """
+    # 1. RBAC
     if current_user.RoleID not in [1, 2]:
         raise HTTPException(status_code=403, detail="Only Pharmacists can dispense medication")
 
-    # 2. Fetch the record
+    # 2. Fetch the prescription record
     prescription = db.query(models.Prescription).filter(
         models.Prescription.PrescriptionID == prescription_id
     ).first()
@@ -291,13 +293,40 @@ def dispense_prescription(
         raise HTTPException(status_code=404, detail="Prescription not found")
 
     # 3. Logic check: Prevent double-dispensing
-    if prescription.Status in ["Dispensed","Collected"]:
-        raise HTTPException(status_code=400, detail="This prescription has already been dispensed")
+    if prescription.Status in ["Dispensed", "Collected"]:
+        raise HTTPException(status_code=400, detail="This prescription has already been dispensed/collected")
 
-    # 4. Perform update
-    prescription.Status = "Dispensed"
-    prescription.DateDispensed = datetime.now().date()
-    prescription.DispensingPharmacist = current_user.Username
-    
-    db.commit()
-    return {"message": f"Success: Prescription {prescription_id} marked as Dispensed"}
+    # 4. Inventory Logic: Fetch the related Medication
+    medication = db.query(models.Medication).filter(
+        models.Medication.MedicationID == prescription.MedicationID
+    ).first()
+
+    if not medication:
+        raise HTTPException(status_code=404, detail="Medication not found in catalog")
+
+    # 5. Check if we have enough stock
+    if medication.StockQuantity < prescription.Quantity:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Insufficient stock for {medication.MedicationName}. Available: {medication.StockQuantity}"
+        )
+
+    # 6. Perform updates in a single transaction
+    try:
+        # Update Prescription
+        prescription.Status = "Dispensed"
+        prescription.DateDispensed = datetime.now().date()
+        prescription.DispensingPharmacist = current_user.Username
+
+        # Deduct from Stock
+        medication.StockQuantity -= prescription.Quantity
+        
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Internal update failed. Transaction rolled back.")
+
+    return {
+        "message": f"Success: Prescription {prescription_id} marked as Dispensed",
+        "stock_remaining": medication.StockQuantity
+    }
