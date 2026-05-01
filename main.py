@@ -29,10 +29,6 @@ def create_access_token(data: dict):
 
 # --- Endpoints ---
 
-@app.get("/")
-def read_root():
-    return {"message": "MedCare API is live and running in Docker!"}
-
 # POST AUTH: Login Endpoint
 @app.post("/auth/login", response_model=schemas.Token, tags=["Security"])
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
@@ -222,3 +218,49 @@ def register_patient_with_portal(
         "username": generated_username,
         "temporary_password": generated_password
     }
+
+"""
+Allows staff to issue multiple medications in one request.
+Restricted to Staff/Admin (Roles 1-4).
+"""
+
+@app.post("/prescriptions/issue", tags=["Clinical Operations"])
+def issue_bulk_prescriptions(
+    bulk_data: schemas.BulkPrescription, 
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+
+    if current_user.RoleID == 5:
+        raise HTTPException(status_code=403, detail="Patients cannot issue prescriptions")
+
+    new_prescriptions = []
+    
+    for item in bulk_data.Items:
+        # Lookup medicine ID by name
+        med_record = db.query(models.Medication).filter(
+            models.Medication.MedicationName.ilike(item.MedicationName)
+        ).first()
+
+        if not med_record:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Medication '{item.MedicationName}' not found."
+            )
+
+        # Create entry with SPECIFIC directions for each medicine
+        new_entry = models.Prescription(
+            PatientID=bulk_data.PatientID,
+            DoctorID=bulk_data.DoctorID,
+            MedicationID=med_record.MedicationID,
+            FacilityID=bulk_data.FacilityID,
+            DatePrescribed=datetime.now().date(),
+            Status="Pending",
+            DirectionsForUse=item.Directions,
+            Quantity=1
+        )
+        db.add(new_entry)
+        new_prescriptions.append(new_entry)
+
+    db.commit()
+    return {"message": f"Successfully issued {len(new_prescriptions)} tailored prescriptions"}

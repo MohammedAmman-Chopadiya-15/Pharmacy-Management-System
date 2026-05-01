@@ -265,7 +265,7 @@ INSERT INTO VACCINATIONS (PatientID, DoctorID, VaccineType, DoseNumber, DateAdmi
 (5, 4, 'Covid-19', 3, '2024-01-20'),
 (3, 2, 'MMR', 1, '2023-05-12'),
 (6, 1, 'Covid-19', 1, '2024-03-01'),
-(6, 1, 'Covid-19', 2, '2024-04-01'), -- Sophie (Dose 2) for multi-dose tracking
+(6, 1, 'Covid-19', 2, '2024-04-01'),
 (7, 3, 'Flu', 1, '2024-10-01'),
 (13, 5, 'Pneumococcal', 1, '2024-02-15');
 
@@ -280,101 +280,3 @@ INSERT INTO PRESCRIPTIONS (PatientID, DoctorID, MedicationID, FacilityID, DatePr
 (7, 3, 2, 3, '2024-04-12', NULL, 28, 'One daily with evening meal', 6, NULL, 'Pending'),
 (6, 2, 8, 5, '2024-04-15', '2024-04-16', 10, 'Five tablets daily for 2 days', 0, 'K. Brown', 'Dispensed'),
 (13, 5, 4, 2, '2024-04-01', NULL, 56, 'Take twice daily', 0, NULL, 'Pending');
-
-
--- ---------------------------------------------------------
--- Data Manipulation Queries
--- ---------------------------------------------------------
-
--- 1. Create a new prescription record
--- Business Case: Dr. Cook (ID 1) prescribing Amoxicillin to Elena (ID 4)
-INSERT INTO PRESCRIPTIONS (PatientID, DoctorID, MedicationID, FacilityID, DatePrescribed, Quantity, DirectionsForUse, Status) 
-VALUES (4, 1, 1, 2, CURDATE(), 21, 'Take one three times daily for 7 days', 'Pending');
-
--- 2. Update a prescription status
--- Business Case: Pharmacist updating a pending script to 'Dispensed'
-UPDATE PRESCRIPTIONS 
-SET Status = 'Dispensed', 
-    DateDispensed = CURDATE(), 
-    DispensingPharmacist = 'K. Brown'
-WHERE PrescriptionID = 3;
-
--- 3. Data Maintenance
--- Business Case: Removing a test or cancelled vaccination record
-DELETE FROM VACCINATIONS WHERE VaccinationID = 999; -- Placeholder ID for deletion logic
-
--- 4. Search medications using wildcards
--- Business Case: Finding all variations of Penicillin or Flu-related meds
-SELECT MedicationName, Dosage, Form_Type 
-FROM MEDICATIONS 
-WHERE MedicationName LIKE '%cillin%' OR MedicationName LIKE '%Flu%';
-
--- 5. Identify Clinical Risks
--- Business Case: Finding all patients who have documented allergies
-SELECT FirstName, LastName, Allergies 
-FROM PATIENTS 
-WHERE Allergies IS NOT NULL AND Allergies != 'None';
-
--- 6. Filter by medication volume
--- Business Case: High-frequency prescriptions with multiple repeats
-SELECT PrescriptionID, PatientID, NumberOfRepeats 
-FROM PRESCRIPTIONS 
-WHERE NumberOfRepeats >= 3 AND Status = 'Collected';
-
--- 7. Full Dispensing Audit
--- Business Case: Linking Patient, Medication, and Facility for a complete history
-SELECT p.LastName AS Patient, m.MedicationName, f.FacilityName AS Pharmacy, pr.Status
-FROM PRESCRIPTIONS pr
-JOIN PATIENTS p ON pr.PatientID = p.PatientID
-JOIN MEDICATIONS m ON pr.MedicationID = m.MedicationID
-JOIN FACILITIES f ON pr.FacilityID = f.FacilityID;
-
--- 8. Vaccination Coverage Report
--- Business Case: Identifying which Doctors gave which vaccines to which Patients
-SELECT p.FirstName, p.LastName, v.VaccineType, v.DoseNumber, d.PrescriberName
-FROM VACCINATIONS v
-JOIN PATIENTS p ON v.PatientID = p.PatientID
-JOIN DOCTORS d ON v.DoctorID = d.DoctorID;
-
--- 9. Doctor Workload by Facility
--- Business Case: Managing staff resources by seeing how many scripts each doctor writes per clinic
-SELECT f.FacilityName, d.PrescriberName, COUNT(pr.PrescriptionID) AS Scripts_Written
-FROM DOCTORS d
-JOIN FACILITIES f ON d.FacilityID = f.FacilityID
-JOIN PRESCRIPTIONS pr ON d.DoctorID = pr.DoctorID
-GROUP BY f.FacilityName, d.PrescriberName;
-
--- 10. Elderly Care Reporting
--- Business Case: Counting prescriptions for patients over the age of 65
-SELECT COUNT(*) AS Elderly_Patient_Prescriptions
-FROM PATIENTS p
-JOIN PRESCRIPTIONS pr ON p.PatientID = pr.PatientID
-WHERE TIMESTAMPDIFF(YEAR, p.DateOfBirth, CURDATE()) >= 65;
-
--- 11. Pharmacy Performance
--- Business Case: Tracking workload per Pharmacist at different locations
-SELECT f.FacilityName, pr.DispensingPharmacist, COUNT(pr.PrescriptionID) AS Total_Filled
-FROM PRESCRIPTIONS pr
-JOIN FACILITIES f ON pr.FacilityID = f.FacilityID
-WHERE pr.DispensingPharmacist IS NOT NULL
-GROUP BY f.FacilityName, pr.DispensingPharmacist;
-
--- 12. Exception Reporting
--- Business Case: Finding patients who have NOT yet received any vaccinations
-SELECT FirstName, LastName, NHS_Number 
-FROM PATIENTS 
-WHERE PatientID NOT IN (SELECT DISTINCT PatientID FROM VACCINATIONS);
-
--- 13. Multi-Dose Tracking
--- Business Case: Identifying patients who have received a Booster (Dose 2 or higher)
-SELECT p.FirstName, p.LastName, v.VaccineType, COUNT(v.VaccinationID) AS Total_Doses
-FROM VACCINATIONS v
-JOIN PATIENTS p ON v.PatientID = p.PatientID
-GROUP BY p.PatientID, v.VaccineType
-HAVING Total_Doses >= 2;
-
--- 14. Authorized Clinical View
--- Business Case: Combining Patient Contact info with History
-SELECT p.FirstName, p.LastName, l.BloodType, l.ChronicConditions
-FROM PATIENTS p
-JOIN PATIENT_RECORDS_LOG l ON p.PatientID = l.PatientID;

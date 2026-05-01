@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import date
-from typing import Optional
+from typing import Optional, List
 
 
 class Token(BaseModel):
@@ -50,6 +50,19 @@ class FacilityWorkload(BaseModel):
     TotalPrescriptions: int
     PendingCount: int
     DispensedCount: int
+
+    class Config:
+        from_attributes = True
+
+class MedicationEntry(BaseModel):
+    MedicationName: str
+    Directions: str
+
+class BulkPrescription(BaseModel):
+    PatientID: int
+    DoctorID: int
+    FacilityID: int
+    Items: List[MedicationEntry]
 
     class Config:
         from_attributes = True

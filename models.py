@@ -21,10 +21,19 @@ class User(Base):
 
 class Prescription(Base):
     __tablename__ = "PRESCRIPTIONS"
+
     PrescriptionID = Column(Integer, primary_key=True, index=True)
     PatientID = Column(Integer, ForeignKey("PATIENTS.PatientID"))
+    DoctorID = Column(Integer, ForeignKey("DOCTORS.DoctorID"))
+    MedicationID = Column(Integer, ForeignKey("MEDICATIONS.MedicationID"))
     FacilityID = Column(Integer, ForeignKey("FACILITIES.FacilityID"))
-    Status = Column(String(20))
+    DatePrescribed = Column(Date, nullable=False)
+    DateDispensed = Column(Date, nullable=True)
+    Quantity = Column(Integer, default=1) # Added to match NOT NULL constraint
+    DirectionsForUse = Column(Text)
+    NumberOfRepeats = Column(Integer, default=0)
+    DispensingPharmacist = Column(String(100))
+    Status = Column(String(20), default="Pending")
 
 
 # The Security View
@@ -73,3 +82,11 @@ class Patient(Base):
 
     # Relationships
     vaccinations = relationship("Vaccination", backref="patient")
+
+class Medication(Base):
+    __tablename__ = "MEDICATIONS"
+
+    MedicationID = Column(Integer, primary_key=True, index=True)
+    MedicationName = Column(String(100), nullable=False)
+    Dosage = Column(String(50))
+    Form_Type = Column(String(50))
