@@ -408,3 +408,54 @@ def cancel_prescription(
     db.delete(prescription)
     db.commit()
     return {"message": f"Prescription {prescription_id} successfully removed."}
+
+"""
+Implements a 'Medical Recall' workflow. Blocks deletion if active unfulfilled prescriptions exist for this drug.
+"""
+
+@app.delete("/medications/{medication_id}/recall", tags=["Inventory Management"])
+def recall_medication(
+    medication_id: int, 
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+
+    # 1. Authorization: Admin or Pharmacist (Role 1 or 2)
+    if current_user.RoleID not in [1, 2]:
+        raise HTTPException(status_code=403, detail="Only Pharmacists/Admins can initiate a recall")
+
+    # 2. Check if medication exists
+    medication = db.query(models.Medication).filter(
+        models.Medication.MedicationID == medication_id
+    ).first()
+    
+    if not medication:
+        raise HTTPException(status_code=404, detail="Medication not found")
+
+    # 3. Safety Check:
+    # We must block the recall if patients are waiting on this specific batch.
+    active_prescriptions = db.query(models.Prescription).filter(
+        models.Prescription.MedicationID == medication_id,
+        models.Prescription.Status == "Pending"
+    ).all()
+
+    if active_prescriptions:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Recall Blocked: {len(active_prescriptions)} active 'Pending' prescriptions exist. "
+                   "These must be cancelled or switched to alternatives first."
+        )
+
+    # 4. Atomic Cleanup
+
+    try:
+        db.delete(medication)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Database error during recall execution.")
+
+    return {
+        "message": f"Recall Success: {medication.MedicationName} removed from catalog.",
+        "affected_records": "All historical prescriptions archived."
+    }
