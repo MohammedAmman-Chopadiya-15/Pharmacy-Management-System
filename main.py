@@ -277,9 +277,6 @@ def dispense_prescription(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Masters Level: Atomic State Transition with Inventory Reconciliation.
-    """
     # 1. RBAC
     if current_user.RoleID not in [1, 2]:
         raise HTTPException(status_code=403, detail="Only Pharmacists can dispense medication")
@@ -330,3 +327,50 @@ def dispense_prescription(
         "message": f"Success: Prescription {prescription_id} marked as Dispensed",
         "stock_remaining": medication.StockQuantity
     }
+
+"""
+Appends a new clinical encounter to history and updates current patient profile.
+"""
+
+@app.put("/patients/{patient_id}/consultation", tags=["Clinical Operations"])
+def conduct_clinical_consultation(
+    patient_id: int, 
+    data: schemas.ClinicalConsultation, 
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    
+    if current_user.RoleID not in [1, 3]: # Admin or Doctor
+        raise HTTPException(status_code=403, detail="Unauthorized clinical access")
+
+    patient = db.query(models.Patient).filter(models.Patient.PatientID == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+# 1. Update Current Profile in PATIENTS table (Robust Guard)
+    if data.NewAllergies and data.NewAllergies.strip():
+        # Convert to lowercase for comparison
+        input_lower = data.NewAllergies.lower()
+        
+        # Keywords that signal the doctor isn't actually adding a new medical allergy
+        danger_keywords = ["no new", "none", "n/a", "no change", "reported", "string"]
+        
+        # Logic: If the input DOES NOT contain any danger keywords, proceed with update
+        if not any(keyword in input_lower for keyword in danger_keywords):
+            patient.Allergies = data.NewAllergies
+        else:
+            # Optional: Log to console for debugging so you see it being ignored
+            print(f"Update ignored: '{data.NewAllergies}' recognized as placeholder.")
+
+    # 2. Create NEW entry in PATIENT_RECORDS_LOG
+    new_log = models.PatientRecordLog(
+        PatientID=patient_id,
+        MedicalHistory=data.ConsultationNotes,
+        BloodType=data.BloodType,
+        ChronicConditions=data.ChronicConditions,
+        LastClinicalReview=datetime.now().date()
+    )
+    
+    db.add(new_log)
+    db.commit()
+    return {"message": "New clinical encounter recorded and profile updated"}

@@ -91,3 +91,14 @@ class Medication(Base):
     Dosage = Column(String(50))
     Form_Type = Column(String(50))
     StockQuantity = Column(Integer, default=0)
+
+
+class PatientRecordLog(Base):
+    __tablename__ = "PATIENT_RECORDS_LOG"
+
+    LogID = Column(Integer, primary_key=True, index=True) # Now the PK
+    PatientID = Column(Integer, ForeignKey("PATIENTS.PatientID"))
+    MedicalHistory = Column(Text)
+    BloodType = Column(String(3))
+    ChronicConditions = Column(Text)
+    LastClinicalReview = Column(Date)

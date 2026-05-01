@@ -66,3 +66,12 @@ class BulkPrescription(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ClinicalConsultation(BaseModel):
+    ConsultationNotes: str
+    NewAllergies: Optional[str] = None
+    BloodType: Optional[str] = None
+    ChronicConditions: Optional[str] = None
+
+    class Config:
+        from_attributes = True

@@ -40,7 +40,8 @@ CREATE TABLE PATIENTS (
 
 -- Create the High-Security Partitioned Table
 CREATE TABLE IF NOT EXISTS PATIENT_RECORDS_LOG (
-    PatientID INT PRIMARY KEY,
+    LogID INT PRIMARY KEY AUTO_INCREMENT,
+    PatientID INT NOT NULL,
     MedicalHistory LONGTEXT,
     BloodType VARCHAR(3),
     ChronicConditions TEXT,
