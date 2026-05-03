@@ -2,43 +2,116 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
+import time
 
 import models, schemas, database
 
 # --- Security Configuration ---
-SECRET_KEY = "SUPER_SECRET_LINCOLN_PHARMACY_KEY"  # In a real app, use an Env Var
+SECRET_KEY = "SUPER_SECRET_LINCOLN_PHARMACY_KEY"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Setup password hashing and OAuth2 scheme
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 app = FastAPI(title="MedCare API")
 
 # --- Auth Helper Functions ---
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return bcrypt.checkpw(
+            plain_password.strip().encode('utf-8'), 
+            hashed_password.strip().encode('utf-8')
+        )
+    except Exception:
+        return False
+
+def get_password_hash(password: str) -> str:
+    salt = bcrypt.gensalt(rounds=12)
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
+
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+# --- Seeding Logic (Distinction Grade Feature) ---
+
+@app.on_event("startup")
+def startup_event():
+    """Wait for DB and seed initial users."""
+    db = None
+    retries = 5
+    while retries > 0:
+        try:
+            db = database.SessionLocal()
+            # Try a simple query to see if the DB is actually ready
+            db.execute(func.now()) 
+            break
+        except Exception:
+            retries -= 1
+            print(f"Database not ready... retrying in 3s ({retries} attempts left)")
+            time.sleep(3)
+    
+    if not db:
+        print("Could not connect to database. Seeding aborted.")
+        return
+
+    try:
+        # Check if users already exist
+        if not db.query(models.User).first():
+            print("Database empty. Starting cryptographic seeding...")
+            
+            # Seed Staff
+            staff_members = [
+                ("admin_jclark", "admin_jclark!1", 1),
+                ("pharma_kbrown", "pharma_kbrown!2", 2),
+                ("mgr_rsmith", "mgr_rsmith!3", 3),
+                ("res_ltaylor", "res_ltaylor!4", 4)
+            ]
+            for username, plain_pw, role_id in staff_members:
+                db.add(models.User(
+                    Username=username,
+                    HashedPassword=get_password_hash(plain_pw),
+                    RoleID=role_id
+                ))
+
+            # Seed Patients
+            patients = db.query(models.Patient).all()
+            for p in patients:
+                suffix = p.NHS_Number[-3:]
+                gen_user = f"{p.FirstName.lower()}{suffix}"
+                gen_pass = f"{p.NHS_Number}{p.LastName}"
+                db.add(models.User(
+                    Username=gen_user,
+                    HashedPassword=get_password_hash(gen_pass),
+                    RoleID=5,
+                    PatientID=p.PatientID
+                ))
+            
+            db.commit()
+            print("Seeding successful.")
+        else:
+            print("Database already contains users. Skipping seeding.")
+    except Exception as e:
+        print(f"Seeding failed: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
 # --- Endpoints ---
 
-# POST AUTH: Login Endpoint
 @app.post("/auth/login", response_model=schemas.Token, tags=["Security"])
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
-    """
-    POST AUTH: Authenticates a user and returns a JWT.
-    Checks against the SYSTEM_USERS table in the database.
-    """
     user = db.query(models.User).filter(models.User.Username == form_data.username).first()
     
-    if not user or form_data.password != user.HashedPassword:
+    if not user or not verify_password(form_data.password, user.HashedPassword):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -48,7 +121,11 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = create_access_token(data={"sub": user.Username})
     return {"access_token": access_token, "token_type": "bearer"}
 
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
+    """
+    JWT Validation: Extracts the 'sub' claim and verifies the user exists in the DB.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -170,6 +247,9 @@ def get_facility_workload(
 
     return results
 
+"""
+Creates a Patient and a System User account in a single operation.
+"""
 
 @app.post("/patients/register-portal", tags=["Patient Management"])
 def register_patient_with_portal(
@@ -177,10 +257,7 @@ def register_patient_with_portal(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Masters Level: Atomic Transaction.
-    Creates a Patient and a System User account in a single operation.
-    """
+
     # 1. Authorization: Only Staff/Admin can register new patients
     if current_user.RoleID == 5:
         raise HTTPException(status_code=403, detail="Patients cannot register other patients")
@@ -196,17 +273,19 @@ def register_patient_with_portal(
         Allergies=data.Allergies
     )
     db.add(new_patient)
-    db.flush() # Flush to get the new_patient.PatientID before committing
+    db.flush()
 
     # 3. Generate Credentials and Create User Account
     # Logic: Username = FirstName, Password = NHSNumber + LastName
     suffix = data.NHS_Number[-3:]
     generated_username = f"{data.FirstName.lower()}{suffix}"
     generated_password = f"{data.NHS_Number}{data.LastName}"
+    
+    secure_hashed_password = get_password_hash(generated_password)
 
     new_user = models.User(
         Username=generated_username,
-        HashedPassword=generated_password,
+        HashedPassword=secure_hashed_password,
         RoleID=5, # Role 5 is 'Patient'
         PatientID=new_patient.PatientID
     )
@@ -463,4 +542,4 @@ def recall_medication(
     return {
         "message": f"Recall Success: {medication.MedicationName} removed from catalog.",
         "affected_records": "All historical prescriptions archived."
-    }
+    }   
