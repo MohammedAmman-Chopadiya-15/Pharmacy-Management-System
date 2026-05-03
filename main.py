@@ -503,8 +503,7 @@ def recall_medication(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-
-    # 1. Authorization: Admin or Pharmacist (Role 1 or 2)
+    # 1. Authorization: Only Admin (1) or Pharmacist (2)
     if current_user.RoleID not in [1, 2]:
         raise HTTPException(status_code=403, detail="Only Pharmacists/Admins can initiate a recall")
 
@@ -516,30 +515,33 @@ def recall_medication(
     if not medication:
         raise HTTPException(status_code=404, detail="Medication not found")
 
-    # 3. Safety Check:
-    # We must block the recall if patients are waiting on this specific batch.
-    active_prescriptions = db.query(models.Prescription).filter(
+    # 3. Safety Check: Block if patients have 'Pending' prescriptions
+    active_exists = db.query(models.Prescription).filter(
         models.Prescription.MedicationID == medication_id,
         models.Prescription.Status == "Pending"
-    ).all()
+    ).first()
 
-    if active_prescriptions:
+    if active_exists:
         raise HTTPException(
             status_code=400, 
-            detail=f"Recall Blocked: {len(active_prescriptions)} active 'Pending' prescriptions exist. "
-                   "These must be cancelled or switched to alternatives first."
+            detail="Recall Blocked: Pending prescriptions exist. Please cancel or switch them first."
         )
 
-    # 4. Atomic Cleanup
-
+    # Logical Delete (Soft Delete)
     try:
-        db.delete(medication)
+        # Zero out the stock so it can't be dispensed
+        medication.StockQuantity = 0
+        
+        # Mark as Recalled
+        medication.MedicationName = f"[RECALLED] {medication.MedicationName}"
+        
         db.commit()
     except Exception as e:
         db.rollback()
+        print(f"Recall Error: {e}")
         raise HTTPException(status_code=500, detail="Database error during recall execution.")
 
     return {
-        "message": f"Recall Success: {medication.MedicationName} removed from catalog.",
-        "affected_records": "All historical prescriptions archived."
-    }   
+        "message": f"Recall Success: {medication.MedicationName.replace('[RECALLED] ', '')} removed from active stock.",
+        "final_inventory_count": 0
+    }
