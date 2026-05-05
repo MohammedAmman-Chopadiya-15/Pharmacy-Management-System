@@ -10,7 +10,7 @@ import time
 
 import models, schemas, database
 
-# --- Security Configuration ---
+# --- Security & Auth Settings ---
 SECRET_KEY = "SUPER_SECRET_LINCOLN_PHARMACY_KEY"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -19,9 +19,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 app = FastAPI(title="MedCare API")
 
-# --- Auth Helper Functions ---
+# --- Security Logic ---
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # Basic check to see if the input password matches stored hash in database.
     try:
         return bcrypt.checkpw(
             plain_password.strip().encode('utf-8'), 
@@ -31,44 +32,45 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 def get_password_hash(password: str) -> str:
+    # Standard bcrypt hashing using 'rounds=12' to balance speed and security
     salt = bcrypt.gensalt(rounds=12)
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
     return hashed.decode('utf-8')
 
 def create_access_token(data: dict):
+    # Used to generate the JWT for every session and sets a 30-minute expiry time
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-# --- Seeding Logic (Distinction Grade Feature) ---
+# --- System Startup & Data Seeding ---
 
 @app.on_event("startup")
 def startup_event():
-    """Wait for DB and seed initial users."""
+    # Function has been made to fix connection race condition:
+    # Keeps the loop running to connect until the DB is actually ready so that app doesn't crash.
     db = None
-    retries = 5
+    retries = 10
     while retries > 0:
         try:
             db = database.SessionLocal()
-            # Try a simple query to see if the DB is actually ready
             db.execute(func.now()) 
             break
         except Exception:
             retries -= 1
-            print(f"Database not ready... retrying in 3s ({retries} attempts left)")
-            time.sleep(3)
+            print(f"Waiting for database... {retries} retries left")
+            time.sleep(5)
     
     if not db:
-        print("Could not connect to database. Seeding aborted.")
         return
 
     try:
-        # Check if users already exist
+        # COndition to check if base users exist
         if not db.query(models.User).first():
-            print("Database empty. Starting cryptographic seeding...")
+            print("Running initial cryptographic seeding for staff and patients...")
             
-            # Seed Staff
+            # Creating default staff accounts (Admin, Pharmacist, Manager, Researcher)
             staff_members = [
                 ("admin_jclark", "admin_jclark!1", 1),
                 ("pharma_kbrown", "pharma_kbrown!2", 2),
@@ -82,7 +84,7 @@ def startup_event():
                     RoleID=role_id
                 ))
 
-            # Seed Patients
+            # Loop to create portal accounts and add to SYSTEM_USERS for every existing patient using a pattern as password
             patients = db.query(models.Patient).all()
             for p in patients:
                 suffix = p.NHS_Number[-3:]
@@ -91,30 +93,33 @@ def startup_event():
                 db.add(models.User(
                     Username=gen_user,
                     HashedPassword=get_password_hash(gen_pass),
-                    RoleID=5,
+                    RoleID=5, # Patient role is 5 in USER_ROLES
                     PatientID=p.PatientID
                 ))
             
             db.commit()
-            print("Seeding successful.")
         else:
-            print("Database already contains users. Skipping seeding.")
+            print("System already seeded. Ready.")
     except Exception as e:
-        print(f"Seeding failed: {e}")
         db.rollback()
     finally:
         db.close()
 
-# --- Endpoints ---
+# ---------------------------------------
+# --- Authentication Endpoints (POST) ---
+# ---------------------------------------
 
+
+# Authenticates users by verifying credentials against the database and returning a secure JWT for session management.
 @app.post("/auth/login", response_model=schemas.Token, tags=["Security"])
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
+    # This is a standard login gate: finds user, checks the hash againts db, and returns the token
     user = db.query(models.User).filter(models.User.Username == form_data.username).first()
     
     if not user or not verify_password(form_data.password, user.HashedPassword):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Invalid login details",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
@@ -123,12 +128,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
-    """
-    JWT Validation: Extracts the 'sub' claim and verifies the user exists in the DB.
-    """
+    # Custom function decodes the JWT to make sure the user is who they say they are for every request
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="Session expired or invalid",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -144,7 +147,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
-# SECURE ENDPOINT: No ID in the URL
+# ----------------------------------
+# --- Patient Portal Endpoints -----
+# ----------------------------------
+
+
+# Securely retrieves the personal prescription history for the currently logged-in patient using their unique session ID.
 @app.get("/my-prescriptions/me", 
          response_model=List[schemas.PatientPortalResponse], 
          tags=["Patient Portal"])
@@ -152,27 +160,26 @@ def get_my_own_prescriptions(
     current_user: models.User = Depends(get_current_user), 
     db: Session = Depends(database.get_db)
 ):
-    """
-    Masters Level: This endpoint is now truly secure. It ignores URL inputs 
-    and uses the PatientID linked to the authenticated JWT session.
-    """
-    # Verify this user is actually a patient
+    # This is built to be "tamper-proof", only shows data based on the logged-in user's ID
+    # Uses token to verify identity and makes sure its a patient
     if current_user.PatientID is None:
-        raise HTTPException(status_code=403, detail="This account is not linked to a patient record")
-
-    # Use the PatientID from the DATABASE
+        raise HTTPException(status_code=403, detail="Not a patient account")
+    
+    # Displays information by using Patient ID as variable for the Self-Service View in Database
     results = db.query(models.PatientSelfService).filter(
         models.PatientSelfService.PatientID == current_user.PatientID
     ).all()
     
     if not results:
-        raise HTTPException(status_code=404, detail="No prescriptions found for your account")
+        raise HTTPException(status_code=404, detail="No prescriptions found")
         
     return results
 
+# ---------------------------
+# --- Reporting Endpoints ---
+# ---------------------------
 
-
-
+# Generates a detailed clinical report, showing records of patients vaccinated based on Vaccination name
 @app.get("/reports/vaccination-coverage/{vaccine_type}", 
          response_model=List[schemas.VaccinationSummary], 
          tags=["Management Reports"])
@@ -181,14 +188,12 @@ def get_vaccination_report(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
     ):
-    """Joins PATIENTS, VACCINATIONS, and DOCTORS to track clinical progress."""
-    # Block patients (Role 5) from seeing aggregate reports
+
+    # To ensure that patients can't see high-level clinical stats
     if current_user.RoleID == 5:
-        raise HTTPException(
-            status_code=403, 
-            detail="Access denied: Patients cannot view management reports"
-        )
+        raise HTTPException(status_code=403, detail="Staff only access")
     
+    # Complex query joining patients, vaccinations, and doctors tables in db to get a full clinical report
     results = db.query(
         func.concat(models.Patient.FirstName, ' ', models.Patient.LastName).label("PatientName"),
         models.Patient.NHS_Number,
@@ -203,31 +208,25 @@ def get_vaccination_report(
      .all()
 
     if not results:
-        raise HTTPException(status_code=404, detail=f"No records found for vaccine: {vaccine_type}")
+        raise HTTPException(status_code=404, detail=f"No data for {vaccine_type}")
 
     return results
 
-"""
-Returns workload metrics for all facilities or a specific one if facility_name is provided.
-"""
 
+# Provides an overview of total, pending, and dispensed prescriptions across different pharmacy locations
 @app.get("/reports/facility-workload", 
          response_model=List[schemas.FacilityWorkload], 
          tags=["Management Reports"])
 def get_facility_workload(
-    facility_name: Optional[str] = None, # New Optional Query Parameter
+    facility_name: Optional[str] = None, 
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
     ):
-
-    # Authorization: Staff only
+    # Check that patients cannot use the endpoint and give a 403 error
     if current_user.RoleID == 5:
-        raise HTTPException(
-            status_code=403, 
-            detail="Access denied: Patients cannot view facility workload reports"
-        )
+        raise HTTPException(status_code=403, detail="Staff only access")
 
-    # Base Query
+    # Perform query to find total counts of prescriptions and status 
     query = db.query(
         models.Facility.FacilityName,
         func.count(models.Prescription.PrescriptionID).label("TotalPrescriptions"),
@@ -235,34 +234,32 @@ def get_facility_workload(
         func.sum(case((models.Prescription.Status == 'Dispensed', 1), else_=0)).label("DispensedCount")
     ).join(models.Prescription, models.Facility.FacilityID == models.Prescription.FacilityID)
 
-    # Apply Filter if parameter is provided
     if facility_name:
         query = query.filter(models.Facility.FacilityName.ilike(f"%{facility_name}%"))
 
     results = query.group_by(models.Facility.FacilityName).all()
 
     if not results:
-        detail_msg = f"No data found for facility: {facility_name}" if facility_name else "No workload data found"
-        raise HTTPException(status_code=404, detail=detail_msg)
+        error_msg = f"No workload data found for facility: {facility_name}" if facility_name else "No workload data found"
+        raise HTTPException(status_code=404, detail=error_msg)
 
     return results
 
-"""
-Creates a Patient and a System User account in a single operation.
-"""
+# -----------------------------
+# --- Operational Endpoints ---
+# -----------------------------
 
+# Simultaneously creates a new patient record as well as their portal account
 @app.post("/patients/register-portal", tags=["Patient Management"])
 def register_patient_with_portal(
     data: schemas.PatientPortalRegistration, 
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-
-    # 1. Authorization: Only Staff/Admin can register new patients
+    # Two-in-one function: Creates the patient record AND their secure login in one transaction
     if current_user.RoleID == 5:
-        raise HTTPException(status_code=403, detail="Patients cannot register other patients")
+        raise HTTPException(status_code=403, detail="Unauthorized")
 
-    # 2. Create the Patient Record
     new_patient = models.Patient(
         NHS_Number=data.NHS_Number,
         FirstName=data.FirstName,
@@ -273,67 +270,53 @@ def register_patient_with_portal(
         Allergies=data.Allergies
     )
     db.add(new_patient)
-    db.flush()
+    db.flush() # Flushes to refresh and get the new PatientID from the User table
 
-    # 3. Generate Credentials and Create User Account
-    # Logic: Username = FirstName, Password = NHSNumber + LastName
+    # Automates new username and password generation for the patient based on pattern
     suffix = data.NHS_Number[-3:]
     generated_username = f"{data.FirstName.lower()}{suffix}"
     generated_password = f"{data.NHS_Number}{data.LastName}"
     
-    secure_hashed_password = get_password_hash(generated_password)
-
+    # Insert records in SYSTEM_USERS table
     new_user = models.User(
         Username=generated_username,
-        HashedPassword=secure_hashed_password,
-        RoleID=5, # Role 5 is 'Patient'
+        HashedPassword=get_password_hash(generated_password),
+        RoleID=5,
         PatientID=new_patient.PatientID
     )
     db.add(new_user)
     
     try:
         db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Registration failed. NHS Number or Username may already exist.")
+        raise HTTPException(status_code=400, detail="Data error: NHS Number might already exist.")
 
-    return {
-        "message": "Patient and Portal account created successfully",
-        "username": generated_username,
-        "temporary_password": generated_password
-    }
+    return {"message": "Success", "username": generated_username, "temp_pass": generated_password}
 
-"""
-Allows staff to issue multiple medications in one request.
-Restricted to Staff/Admin (Roles 1-4).
-"""
 
+# Allows authorized clinical staff to issue multiple medications to a patient in a single request
 @app.post("/prescriptions/issue", tags=["Clinical Operations"])
 def issue_bulk_prescriptions(
-    bulk_data: schemas.BulkPrescription, 
+    bulk_data: schemas.BulkPrescription,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-
-    if current_user.RoleID == 5:
-        raise HTTPException(status_code=403, detail="Patients cannot issue prescriptions")
-
-    new_prescriptions = []
     
+    if current_user.RoleID == 5:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    # Loop thorugh list of new records
     for item in bulk_data.Items:
-        # Lookup medicine ID by name
+        # check if all medications exist in system 
         med_record = db.query(models.Medication).filter(
             models.Medication.MedicationName.ilike(item.MedicationName)
         ).first()
-
         if not med_record:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Medication '{item.MedicationName}' not found."
-            )
-
-        # Create entry with SPECIFIC directions for each medicine
-        new_entry = models.Prescription(
+            raise HTTPException(status_code=404, detail=f"Medication {item.MedicationName} not found")
+        
+        # Add the new record into PRESCRIPTIONS table
+        db.add(models.Prescription(
             PatientID=bulk_data.PatientID,
             DoctorID=bulk_data.DoctorID,
             MedicationID=med_record.MedicationID,
@@ -342,80 +325,60 @@ def issue_bulk_prescriptions(
             Status="Pending",
             DirectionsForUse=item.Directions,
             Quantity=1
-        )
-        db.add(new_entry)
-        new_prescriptions.append(new_entry)
+        ))
 
     db.commit()
-    return {"message": f"Successfully issued {len(new_prescriptions)} tailored prescriptions"}
+    return {"message": "Prescriptions issued successfully"}
 
-
-"""
-State Machine Transition.
-Only allows Roles 1 (Admin) or 2 (Pharmacist) to update status to 'Dispensed'.
-"""
-
+# Handle the physical dispensing of medication, updates the prescription status, and automatically deducts the items from the inventory. 
 @app.put("/prescriptions/{prescription_id}/dispense", tags=["Clinical Operations"])
 def dispense_prescription(
     prescription_id: int, 
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    # 1. RBAC
-    if current_user.RoleID not in [1, 2]:
-        raise HTTPException(status_code=403, detail="Only Pharmacists can dispense medication")
 
-    # 2. Fetch the prescription record
-    prescription = db.query(models.Prescription).filter(
-        models.Prescription.PrescriptionID == prescription_id
-    ).first()
+    # Only Admin or Pharmacist users can access API
+    if current_user.RoleID not in [1, 2]:  
+        raise HTTPException(status_code=403, detail="Only Pharmacists can dispense")
 
+    # Verify precription actually exists based on ID
+    prescription = db.query(models.Prescription).filter(models.Prescription.PrescriptionID == prescription_id).first()
     if not prescription:
-        raise HTTPException(status_code=404, detail="Prescription not found")
-
-    # 3. Logic check: Prevent double-dispensing
+        raise HTTPException(status_code=400, detail="Prescription not found")
+    
+    # Logic check: Prevent double-dispensing
     if prescription.Status in ["Dispensed", "Collected"]:
         raise HTTPException(status_code=400, detail="This prescription has already been dispensed/collected")
 
-    # 4. Inventory Logic: Fetch the related Medication
-    medication = db.query(models.Medication).filter(
-        models.Medication.MedicationID == prescription.MedicationID
-    ).first()
 
+    # Check the drug exists in MEDICATIONS table
+    medication = db.query(models.Medication).filter(models.Medication.MedicationID == prescription.MedicationID).first()
     if not medication:
         raise HTTPException(status_code=404, detail="Medication not found in catalog")
-
-    # 5. Check if we have enough stock
+    
+    # Doesn't dispense if the shelf is empty (Stock = 0)
     if medication.StockQuantity < prescription.Quantity:
         raise HTTPException(
             status_code=400, 
             detail=f"Insufficient stock for {medication.MedicationName}. Available: {medication.StockQuantity}"
         )
 
-    # 6. Perform updates in a single transaction
     try:
-        # Update Prescription
+        # Update both the record and the inventory to maintain consistency
         prescription.Status = "Dispensed"
         prescription.DateDispensed = datetime.now().date()
         prescription.DispensingPharmacist = current_user.Username
-
-        # Deduct from Stock
         medication.StockQuantity -= prescription.Quantity
-        
         db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Internal update failed. Transaction rolled back.")
+        raise HTTPException(status_code=500, detail="Transaction failed")
 
-    return {
-        "message": f"Success: Prescription {prescription_id} marked as Dispensed",
-        "stock_remaining": medication.StockQuantity
-    }
+    return {"message": "Medication dispensed successfully"}
 
-"""
-Appends a new clinical encounter to history and updates current patient profile.
-"""
 
+# Updating the patient records for both PATIENT and PATIENT_RECORD_LOGS after a new cnsulatation appointment.
 @app.put("/patients/{patient_id}/consultation", tags=["Clinical Operations"])
 def conduct_clinical_consultation(
     patient_id: int, 
@@ -423,15 +386,16 @@ def conduct_clinical_consultation(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    
-    if current_user.RoleID not in [1, 3]: # Admin or Doctor
+    # Only Admin or Doctor allowed to access endpoint
+    if current_user.RoleID not in [1, 3]:
         raise HTTPException(status_code=403, detail="Unauthorized clinical access")
-
+    
+    # If Patient ID doesnot match, retun an error response
     patient = db.query(models.Patient).filter(models.Patient.PatientID == patient_id).first()
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-# 1. Update Current Profile in PATIENTS table (Robust Guard)
+    # Update Current Profile in PATIENTS table (Allergy)
     if data.NewAllergies and data.NewAllergies.strip():
         # Convert to lowercase for comparison
         input_lower = data.NewAllergies.lower()
@@ -443,10 +407,9 @@ def conduct_clinical_consultation(
         if not any(keyword in input_lower for keyword in danger_keywords):
             patient.Allergies = data.NewAllergies
         else:
-            # Optional: Log to console for debugging so you see it being ignored
             print(f"Update ignored: '{data.NewAllergies}' recognized as placeholder.")
 
-    # 2. Create NEW entry in PATIENT_RECORDS_LOG
+    # Creating NEW entry in PATIENT_RECORDS_LOG
     new_log = models.PatientRecordLog(
         PatientID=patient_id,
         MedicalHistory=data.ConsultationNotes,
@@ -459,19 +422,15 @@ def conduct_clinical_consultation(
     db.commit()
     return {"message": "New clinical encounter recorded and profile updated"}
 
-"""
-Delete incorrect prescription records
-Prevents deletion of fulfilled clinical records to maintain legal audit trails.
-"""
 
+# Removes an incorrect or accidental prescription record from the system (Only before it is fulfilled).
 @app.delete("/prescriptions/{prescription_id}", tags=["Clinical Operations"])
 def cancel_prescription(
     prescription_id: int, 
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-
-    # 1. Auth: Only Admins or Doctors
+    # Only Admins or Doctors should be able to cancel orders
     if current_user.RoleID not in [1, 3]:
         raise HTTPException(status_code=403, detail="Only clinical staff can cancel prescriptions")
 
@@ -482,7 +441,7 @@ def cancel_prescription(
     if not prescription:
         raise HTTPException(status_code=404, detail="Prescription not found")
 
-    # 2. The Guard: Block deletion if already fulfilled
+    # Safety Guard: Prevent deletion of records that are already part of a clinical audit trail
     if prescription.Status in ["Dispensed", "Collected"]:
         raise HTTPException(
             status_code=400, 
@@ -493,55 +452,34 @@ def cancel_prescription(
     db.commit()
     return {"message": f"Prescription {prescription_id} successfully removed."}
 
-"""
-Implements a 'Medical Recall' workflow. Blocks deletion if active unfulfilled prescriptions exist for this drug.
-"""
-
+# Executes a medical recall by zeroing out stock and flagging the medication name to prevent any further dispensing.
 @app.delete("/medications/{medication_id}/recall", tags=["Inventory Management"])
 def recall_medication(
     medication_id: int, 
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    # 1. Authorization: Only Admin (1) or Pharmacist (2)
+    # Make sure only admin and pharmacist can use endpoint
     if current_user.RoleID not in [1, 2]:
-        raise HTTPException(status_code=403, detail="Only Pharmacists/Admins can initiate a recall")
+        raise HTTPException(status_code=403, detail="Unauthorized")
 
-    # 2. Check if medication exists
-    medication = db.query(models.Medication).filter(
-        models.Medication.MedicationID == medication_id
-    ).first()
-    
+    # Checking if drug exists in MEDICINES based on ID
+    medication = db.query(models.Medication).filter(models.Medication.MedicationID == medication_id).first()
     if not medication:
-        raise HTTPException(status_code=404, detail="Medication not found")
-
-    # 3. Safety Check: Block if patients have 'Pending' prescriptions
+        raise HTTPException(status_code=404, detail=f"Medication with ID {medication_id} not found")
+    
+    # Safety Check: Can't recall if there are active prescriptions waiting in PRESCRIPTIONS table
     active_exists = db.query(models.Prescription).filter(
         models.Prescription.MedicationID == medication_id,
         models.Prescription.Status == "Pending"
     ).first()
 
     if active_exists:
-        raise HTTPException(
-            status_code=400, 
-            detail="Recall Blocked: Pending prescriptions exist. Please cancel or switch them first."
-        )
+        raise HTTPException(status_code=400, detail="Pending orders exist. Recall blocked.")
 
-    # Logical Delete (Soft Delete)
-    try:
-        # Zero out the stock so it can't be dispensed
-        medication.StockQuantity = 0
-        
-        # Mark as Recalled
-        medication.MedicationName = f"[RECALLED] {medication.MedicationName}"
-        
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        print(f"Recall Error: {e}")
-        raise HTTPException(status_code=500, detail="Database error during recall execution.")
-
-    return {
-        "message": f"Recall Success: {medication.MedicationName.replace('[RECALLED] ', '')} removed from active stock.",
-        "final_inventory_count": 0
-    }
+    # Logical Delete : Instead of deleting the row, zero out stock and flag it it .
+    # This protects our history while preventing new orders.
+    medication.StockQuantity = 0
+    medication.MedicationName = f"[RECALLED] {medication.MedicationName}"
+    db.commit()
+    return {"message": "Recall successful"}

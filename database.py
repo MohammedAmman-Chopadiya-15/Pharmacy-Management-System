@@ -3,7 +3,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-
+# URL for a connection to the database
+# Values actually put in .env file in a production environment
 SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:admin123@db:3306/MedCare"
 
 # The engine is the starting point for any SQLAlchemy application

@@ -22,7 +22,7 @@ services:
     depends_on:
     - db
     environment:
-      # Note: We use 'db' (the service name) instead of 'localhost'
+      # Note: Using 'db' (the service name) instead of 'localhost'
       DATABASE_URL: mysql+pymysql://root:your_password@db:3306/MedCare
     volumes:
     - .:/app
